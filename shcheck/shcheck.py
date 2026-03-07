@@ -347,11 +347,12 @@ def main():
         json_results["missing"] = []
 
         # Before parsing, remove X-Frame-Options if there's CSP with frame-ancestors directive
+        target_sec_headers = dict(sec_headers)
         if "content-security-policy" in headers.keys() and "frame-ancestors" in headers.get("content-security-policy").lower():
-            sec_headers.pop("X-Frame-Options", None)
+            target_sec_headers.pop("X-Frame-Options", None)
             headers.pop("X-Frame-Options".lower(), None)
 
-        for safeh in sec_headers:
+        for safeh in target_sec_headers:
             lsafeh = safeh.lower()
             if lsafeh in headers:
                 safe += 1
@@ -397,7 +398,7 @@ def main():
                     json_results["missing"].remove(safeh)
                     continue
                 # Hide deprecated
-                if not show_deprecated and sec_headers.get(safeh) == "deprecated":
+                if not show_deprecated and target_sec_headers.get(safeh) == "deprecated":
                     unsafe -= 1
                     json_results["missing"].remove(safeh)            
                     continue
