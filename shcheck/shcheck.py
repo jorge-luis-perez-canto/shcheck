@@ -66,7 +66,7 @@ client_headers = {
     'Accept': 'text/html,application/xhtml+xml,\
  application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'en-US;q=0.8,en;q=0.3',
-    'Upgrade-Insecure-Requests': 1
+    'Upgrade-Insecure-Requests': '1'
  }
 
 
@@ -96,7 +96,7 @@ information_headers = {
 cache_headers = {
     'Cache-Control',
     'Pragma',
-    'Last-Modified'
+    'Last-Modified',
     'Expires',
     'ETag'
 }
