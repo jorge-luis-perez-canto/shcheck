@@ -32,7 +32,6 @@ def make_options(**kwargs):
         json_output=False,
         colours='none',
         ssldisabled=False,
-        useget=False,
         usemethod='HEAD',
         proxy=None,
         no_follow=False,
@@ -82,17 +81,6 @@ def test_no_args_return_help():
 
 
 # ---------------------------------------------------------------------------
-# is_https
-# ---------------------------------------------------------------------------
-
-def test_is_https_true():
-    assert shcheck.is_https('https://example.com') is True
-
-def test_is_https_false():
-    assert shcheck.is_https('http://example.com') is False
-
-
-# ---------------------------------------------------------------------------
 # append_port
 # ---------------------------------------------------------------------------
 
@@ -128,14 +116,14 @@ def test_normalize_http_url_unchanged():
 # ---------------------------------------------------------------------------
 
 def test_parse_headers_lowercases_keys():
-    shcheck.parse_headers([('X-Frame-Options', 'DENY'), ('Content-Type', 'text/html')])
-    assert 'x-frame-options' in shcheck.headers
-    assert shcheck.headers['x-frame-options'] == 'DENY'
-    assert 'content-type' in shcheck.headers
+    result = shcheck.parse_headers([('X-Frame-Options', 'DENY'), ('Content-Type', 'text/html')])
+    assert 'x-frame-options' in result
+    assert result['x-frame-options'] == 'DENY'
+    assert 'content-type' in result
 
 def test_parse_headers_preserves_values():
-    shcheck.parse_headers([('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')])
-    assert shcheck.headers['strict-transport-security'] == 'max-age=31536000; includeSubDomains'
+    result = shcheck.parse_headers([('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')])
+    assert result['strict-transport-security'] == 'max-age=31536000; includeSubDomains'
 
 
 # ---------------------------------------------------------------------------
