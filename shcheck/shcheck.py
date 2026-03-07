@@ -190,8 +190,7 @@ def normalize(target):
             target = 'http://' + target
     except (ValueError, socket.error):
         pass
-    finally:
-        return target
+    return target
 
 
 def print_error(target, e):
