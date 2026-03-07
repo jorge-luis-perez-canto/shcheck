@@ -1,3 +1,4 @@
+import http.client
 import io
 import json
 import sys
@@ -312,26 +313,26 @@ def test_json_hsts_missing_for_https_target():
 def test_json_information_disclosure_with_flag():
     headers = SAMPLE_HEADERS + [('Server', 'Apache/2.4'), ('X-Powered-By', 'PHP/8.0')]
     data = _run_json(['-i'], headers, HTTPS_URL)
-    assert 'information_disclosure' in data
-    assert data['information_disclosure']['Server'] == 'Apache/2.4'
-    assert data['information_disclosure']['X-Powered-By'] == 'PHP/8.0'
+    assert 'information_disclosure' in data[HTTPS_URL]
+    assert data[HTTPS_URL]['information_disclosure']['Server'] == 'Apache/2.4'
+    assert data[HTTPS_URL]['information_disclosure']['X-Powered-By'] == 'PHP/8.0'
 
 def test_json_no_information_disclosure_without_flag():
     headers = SAMPLE_HEADERS + [('Server', 'Apache/2.4')]
     data = _run_json([], headers, HTTPS_URL)
-    assert 'information_disclosure' not in data
+    assert 'information_disclosure' not in data[HTTPS_URL]
 
 def test_json_caching_headers_with_flag():
     headers = SAMPLE_HEADERS + [('Cache-Control', 'no-store'), ('ETag', '"abc123"')]
     data = _run_json(['-x'], headers, HTTPS_URL)
-    assert 'caching' in data
-    assert data['caching']['Cache-Control'] == 'no-store'
-    assert data['caching']['ETag'] == '"abc123"'
+    assert 'caching' in data[HTTPS_URL]
+    assert data[HTTPS_URL]['caching']['Cache-Control'] == 'no-store'
+    assert data[HTTPS_URL]['caching']['ETag'] == '"abc123"'
 
 def test_json_no_caching_headers_without_flag():
     headers = SAMPLE_HEADERS + [('Cache-Control', 'no-store')]
     data = _run_json([], headers, HTTPS_URL)
-    assert 'caching' not in data
+    assert 'caching' not in data[HTTPS_URL]
 
 
 # ---------------------------------------------------------------------------
@@ -355,3 +356,96 @@ def test_json_and_normal_output_consistent():
     # Summary counts must match
     assert f"{len(data[HTTPS_URL]['present'])} security header(s) present" in normal
     assert f"{len(data[HTTPS_URL]['missing'])} security header(s) missing" in normal
+
+
+# ---------------------------------------------------------------------------
+# Bug confirmations (tests currently FAIL — fixed by upcoming patches)
+# ---------------------------------------------------------------------------
+
+def _run_json_multi(extra_args, targets_and_headers):
+    """Run main() with -j against multiple targets. targets_and_headers is a list
+    of (url, headers) pairs; urlopen responses are returned in order."""
+    mocks = [_mock_response(hdrs, url) for url, hdrs in targets_and_headers]
+    urls = [url for url, _ in targets_and_headers]
+    captured = io.StringIO()
+    old_stdout = sys.stdout
+    try:
+        with patch('sys.argv', ['shcheck.py', '-j'] + extra_args + urls), \
+             patch.object(sys, '__stdout__', captured), \
+             patch('urllib.request.urlopen', side_effect=mocks):
+            shcheck.main()
+    finally:
+        sys.stdout = old_stdout
+    return json.loads(captured.getvalue())
+
+
+# Bug #1 — information_disclosure and caching overwrite each other across targets
+
+def test_bug1_information_disclosure_preserved_per_target():
+    """information_disclosure must be nested under each URL, not as a shared
+    top-level key that later targets silently overwrite."""
+    first_url = 'https://first.example.com'
+    second_url = 'https://second.example.com'
+    data = _run_json_multi(
+        ['-i'],
+        [
+            (first_url,  [('Server', 'Apache/2.4')]),
+            (second_url, [('Server', 'nginx/1.18')]),
+        ]
+    )
+    assert data[first_url]['information_disclosure']['Server'] == 'Apache/2.4'
+    assert data[second_url]['information_disclosure']['Server'] == 'nginx/1.18'
+
+
+def test_bug1_caching_preserved_per_target():
+    """caching must be nested under each URL, not as a shared top-level key
+    that later targets silently overwrite."""
+    first_url = 'https://first.example.com'
+    second_url = 'https://second.example.com'
+    data = _run_json_multi(
+        ['-x'],
+        [
+            (first_url,  [('Cache-Control', 'no-store')]),
+            (second_url, [('Cache-Control', 'max-age=3600')]),
+        ]
+    )
+    assert data[first_url]['caching']['Cache-Control'] == 'no-store'
+    assert data[second_url]['caching']['Cache-Control'] == 'max-age=3600'
+
+
+# Bug #2 — print() calls in check_target are swallowed by stdout redirect under -j
+
+def test_bug2_unknown_protocol_error_visible_in_json_mode():
+    """'Unknown protocol' error must reach stderr even when -j redirects stdout
+    to devnull. Currently the message is swallowed."""
+    captured_stderr = io.StringIO()
+    captured_json = io.StringIO()
+    old_stdout = sys.stdout
+    try:
+        with patch('sys.argv', ['shcheck.py', '-j', HTTPS_URL]), \
+             patch.object(sys, '__stdout__', captured_json), \
+             patch('sys.stderr', captured_stderr), \
+             patch('urllib.request.urlopen',
+                   side_effect=http.client.UnknownProtocol('HTTP/2')):
+            shcheck.main()
+    finally:
+        sys.stdout = old_stdout
+    assert 'Unknown protocol' in captured_stderr.getvalue()
+
+
+def test_bug2_no_response_error_visible_in_json_mode():
+    """'Couldn't read a response from server.' must reach stderr even when -j
+    redirects stdout to devnull. Currently the message is swallowed."""
+    captured_stderr = io.StringIO()
+    captured_json = io.StringIO()
+    old_stdout = sys.stdout
+    try:
+        with patch('sys.argv', ['shcheck.py', '-j', HTTPS_URL]), \
+             patch.object(sys, '__stdout__', captured_json), \
+             patch('sys.stderr', captured_stderr), \
+             patch('urllib.request.urlopen',
+                   side_effect=http.client.UnknownProtocol('HTTP/2')):
+            shcheck.main()
+    finally:
+        sys.stdout = old_stdout
+    assert "Couldn't read a response from server." in captured_stderr.getvalue()

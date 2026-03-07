@@ -239,7 +239,7 @@ def check_target(target):
 
     # Handling issues with HTTP/2
     except http.client.UnknownProtocol as e:
-        print("Unknown protocol: {}. Are you using a proxy? Try disabling it".format(e))
+        sys.stderr.write("Unknown protocol: {}. Are you using a proxy? Try disabling it\n".format(e))
     except Exception as e:
         print_error(target, e)
         if hasattr(e, 'code') and e.code >= 400 and e.code < 500:
@@ -249,7 +249,7 @@ def check_target(target):
 
     if response is not None:
         return response
-    print("Couldn't read a response from server.")
+    sys.stderr.write("Couldn't read a response from server.\n")
     return None
 
 
@@ -406,13 +406,13 @@ def main():
                     colorize(safeh, sec_headers.get(safeh))))
 
         if information:
-            json_headers["information_disclosure"] = {}
+            json_results["information_disclosure"] = {}
             i_chk = False
             log("")
             for infoh in information_headers:
                 linfoh = infoh.lower()
                 if linfoh in headers:
-                    json_headers["information_disclosure"][infoh] = headers.get(linfoh)
+                    json_results["information_disclosure"][infoh] = headers.get(linfoh)
                     i_chk = True
                     log("[!] Possible information disclosure: \
 header {} is present! (Value: {})".format(
@@ -422,13 +422,13 @@ header {} is present! (Value: {})".format(
                 log("[*] No information disclosure headers detected")
 
         if cache_control:
-            json_headers["caching"] = {}
+            json_results["caching"] = {}
             c_chk = False
             log("")
             for cacheh in cache_headers:
                 lcacheh = cacheh.lower()
                 if lcacheh in headers:
-                    json_headers["caching"][cacheh] = headers.get(lcacheh)
+                    json_results["caching"][cacheh] = headers.get(lcacheh)
                     c_chk = True
                     log("[!] Cache control header {} is present! \
 (Value: {})".format(
