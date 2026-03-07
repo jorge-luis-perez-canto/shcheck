@@ -32,7 +32,6 @@ def make_options(**kwargs):
         json_output=False,
         colours='none',
         ssldisabled=False,
-        useget=False,
         usemethod='HEAD',
         proxy=None,
         no_follow=False,
@@ -52,14 +51,10 @@ def _run_json(extra_args, headers, url):
     """Run main() with -j and return parsed JSON output."""
     mock = _mock_response(headers, url)
     captured = io.StringIO()
-    old_stdout = sys.stdout
-    try:
-        with patch('sys.argv', ['shcheck.py', '-j'] + extra_args + [url]), \
-             patch.object(sys, '__stdout__', captured), \
-             patch('urllib.request.urlopen', return_value=mock):
-            shcheck.main()
-    finally:
-        sys.stdout = old_stdout
+    with patch('sys.argv', ['shcheck.py', '-j'] + extra_args + [url]), \
+         patch('sys.stdout', captured), \
+         patch('urllib.request.urlopen', return_value=mock):
+        shcheck.main()
     return json.loads(captured.getvalue())
 
 
@@ -86,17 +81,6 @@ def test_no_args_return_help():
 
 
 # ---------------------------------------------------------------------------
-# is_https
-# ---------------------------------------------------------------------------
-
-def test_is_https_true():
-    assert shcheck.is_https('https://example.com') is True
-
-def test_is_https_false():
-    assert shcheck.is_https('http://example.com') is False
-
-
-# ---------------------------------------------------------------------------
 # append_port
 # ---------------------------------------------------------------------------
 
@@ -104,7 +88,7 @@ def test_append_port_with_trailing_slash():
     assert shcheck.append_port('http://example.com/', '8080') == 'http://example.com:8080/'
 
 def test_append_port_without_trailing_slash():
-    assert shcheck.append_port('http://example.com', '8080') == 'http://example.com:8080/'
+    assert shcheck.append_port('http://example.com', '8080') == 'http://example.com:8080'
 
 
 # ---------------------------------------------------------------------------
@@ -132,14 +116,14 @@ def test_normalize_http_url_unchanged():
 # ---------------------------------------------------------------------------
 
 def test_parse_headers_lowercases_keys():
-    shcheck.parse_headers([('X-Frame-Options', 'DENY'), ('Content-Type', 'text/html')])
-    assert 'x-frame-options' in shcheck.headers
-    assert shcheck.headers['x-frame-options'] == 'DENY'
-    assert 'content-type' in shcheck.headers
+    result = shcheck.parse_headers([('X-Frame-Options', 'DENY'), ('Content-Type', 'text/html')])
+    assert 'x-frame-options' in result
+    assert result['x-frame-options'] == 'DENY'
+    assert 'content-type' in result
 
 def test_parse_headers_preserves_values():
-    shcheck.parse_headers([('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')])
-    assert shcheck.headers['strict-transport-security'] == 'max-age=31536000; includeSubDomains'
+    result = shcheck.parse_headers([('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')])
+    assert result['strict-transport-security'] == 'max-age=31536000; includeSubDomains'
 
 
 # ---------------------------------------------------------------------------
@@ -199,14 +183,10 @@ def test_sec_headers_not_mutated_across_targets():
     mock2 = _mock_response(headers_without_xfo, second_url)
 
     captured = io.StringIO()
-    old_stdout = sys.stdout
-    try:
-        with patch('sys.argv', ['shcheck.py', '-j', HTTPS_URL, second_url]), \
-             patch.object(sys, '__stdout__', captured), \
-             patch('urllib.request.urlopen', side_effect=[mock1, mock2]):
-            shcheck.main()
-    finally:
-        sys.stdout = old_stdout
+    with patch('sys.argv', ['shcheck.py', '-j', HTTPS_URL, second_url]), \
+         patch('sys.stdout', captured), \
+         patch('urllib.request.urlopen', side_effect=[mock1, mock2]):
+        shcheck.main()
 
     data = json.loads(captured.getvalue())
     # X-Frame-Options must still be checked on the second target
@@ -368,14 +348,10 @@ def _run_json_multi(extra_args, targets_and_headers):
     mocks = [_mock_response(hdrs, url) for url, hdrs in targets_and_headers]
     urls = [url for url, _ in targets_and_headers]
     captured = io.StringIO()
-    old_stdout = sys.stdout
-    try:
-        with patch('sys.argv', ['shcheck.py', '-j'] + extra_args + urls), \
-             patch.object(sys, '__stdout__', captured), \
-             patch('urllib.request.urlopen', side_effect=mocks):
-            shcheck.main()
-    finally:
-        sys.stdout = old_stdout
+    with patch('sys.argv', ['shcheck.py', '-j'] + extra_args + urls), \
+         patch('sys.stdout', captured), \
+         patch('urllib.request.urlopen', side_effect=mocks):
+        shcheck.main()
     return json.loads(captured.getvalue())
 
 
@@ -416,36 +392,24 @@ def test_bug1_caching_preserved_per_target():
 # Bug #2 — print() calls in check_target are swallowed by stdout redirect under -j
 
 def test_bug2_unknown_protocol_error_visible_in_json_mode():
-    """'Unknown protocol' error must reach stderr even when -j redirects stdout
-    to devnull. Currently the message is swallowed."""
+    """'Unknown protocol' error must reach stderr even in -j mode."""
     captured_stderr = io.StringIO()
-    captured_json = io.StringIO()
-    old_stdout = sys.stdout
-    try:
-        with patch('sys.argv', ['shcheck.py', '-j', HTTPS_URL]), \
-             patch.object(sys, '__stdout__', captured_json), \
-             patch('sys.stderr', captured_stderr), \
-             patch('urllib.request.urlopen',
-                   side_effect=http.client.UnknownProtocol('HTTP/2')):
-            shcheck.main()
-    finally:
-        sys.stdout = old_stdout
+    with patch('sys.argv', ['shcheck.py', '-j', HTTPS_URL]), \
+         patch('sys.stdout', io.StringIO()), \
+         patch('sys.stderr', captured_stderr), \
+         patch('urllib.request.urlopen',
+               side_effect=http.client.UnknownProtocol('HTTP/2')):
+        shcheck.main()
     assert 'Unknown protocol' in captured_stderr.getvalue()
 
 
 def test_bug2_no_response_error_visible_in_json_mode():
-    """'Couldn't read a response from server.' must reach stderr even when -j
-    redirects stdout to devnull. Currently the message is swallowed."""
+    """'Couldn't read a response from server.' must reach stderr even in -j mode."""
     captured_stderr = io.StringIO()
-    captured_json = io.StringIO()
-    old_stdout = sys.stdout
-    try:
-        with patch('sys.argv', ['shcheck.py', '-j', HTTPS_URL]), \
-             patch.object(sys, '__stdout__', captured_json), \
-             patch('sys.stderr', captured_stderr), \
-             patch('urllib.request.urlopen',
-                   side_effect=http.client.UnknownProtocol('HTTP/2')):
-            shcheck.main()
-    finally:
-        sys.stdout = old_stdout
+    with patch('sys.argv', ['shcheck.py', '-j', HTTPS_URL]), \
+         patch('sys.stdout', io.StringIO()), \
+         patch('sys.stderr', captured_stderr), \
+         patch('urllib.request.urlopen',
+               side_effect=http.client.UnknownProtocol('HTTP/2')):
+        shcheck.main()
     assert "Couldn't read a response from server." in captured_stderr.getvalue()

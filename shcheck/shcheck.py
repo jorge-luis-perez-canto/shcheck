@@ -25,31 +25,21 @@ import http.client
 import socket
 import sys
 import ssl
-import os
 import json
-from optparse import OptionParser
+import argparse
 
 
-class darkcolours:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[93m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+def _make_colours(warning):
+    class _C:
+        OKBLUE  = '\033[94m'
+        OKGREEN = '\033[92m'
+        FAIL    = '\033[91m'
+        ENDC    = '\033[0m'
+        WARNING = warning
+    return _C
 
-
-class lightcolours:
-    HEADER = '\033[95m'
-    OKBLUE = '\033[94m'
-    OKGREEN = '\033[92m'
-    WARNING = '\033[95m'
-    FAIL = '\033[91m'
-    ENDC = '\033[0m'
-    BOLD = '\033[1m'
-    UNDERLINE = '\033[4m'
+darkcolours  = _make_colours('\033[93m')
+lightcolours = _make_colours('\033[95m')
 
 
 # log - prints unless JSON output is set
@@ -101,7 +91,7 @@ cache_headers = {
     'ETag'
 }
 
-headers = {}
+options = None
 
 
 def banner():
@@ -131,14 +121,27 @@ def colorize(string, alert):
 
 
 def parse_headers(hdrs):
-    global headers
-    headers = dict((x.lower(), y) for x, y in hdrs)
+    return dict((x.lower(), y) for x, y in hdrs)
 
 
 def append_port(target, port):
-    return target[:-1] + ':' + port + '/' \
-        if target[-1:] == '/' \
-        else target + ':' + port + '/'
+    if target[-1:] == '/':
+        return target[:-1] + ':' + port + '/'
+    return target + ':' + port
+
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def _handle_redirect(self, req, fp, code, msg, headers):
+        url = req.get_full_url()
+        resp = urllib.response.addinfourl(fp, headers, url)
+        resp.status = code
+        resp.code = code
+        return resp
+    http_error_301 = _handle_redirect
+    http_error_302 = _handle_redirect
+    http_error_303 = _handle_redirect
+    http_error_307 = _handle_redirect
+    http_error_308 = _handle_redirect
 
 
 def build_opener(proxy, ssldisabled, nofollow=False):
@@ -153,31 +156,9 @@ def build_opener(proxy, ssldisabled, nofollow=False):
         ctx = ssl.create_default_context()
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
-        sslhnd = urllib.request.HTTPSHandler(context = ctx)
+        sslhnd = urllib.request.HTTPSHandler(context=ctx)
 
     if nofollow:
-        class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-            def _build_response(self, req, fp, code, headers):
-                # Create an addinfourl object instead of following the redirect
-                url = req.get_full_url()
-                resp = urllib.response.addinfourl(fp, headers, url)
-                try:
-                    resp.status = code # store HTTP status code
-                except Exception:
-                    pass
-                resp.code = code
-                return resp
-            def http_error_301(self, req, fp, code, msg, headers):
-                return self._build_response(req, fp, code, headers)
-            def http_error_302(self, req, fp, code, msg, headers):
-                return self._build_response(req, fp, code, headers)
-            def http_error_303(self, req, fp, code, msg, headers):
-                return self._build_response(req, fp, code, headers)
-            def http_error_307(self, req, fp, code, msg, headers):
-                return self._build_response(req, fp, code, headers)
-            def http_error_308(self, req, fp, code, msg, headers):
-                return self._build_response(req, fp, code, headers)
-
         opener = urllib.request.build_opener(NoRedirectHandler(), proxyhnd, sslhnd)
     else:
         opener = urllib.request.build_opener(proxyhnd, sslhnd)
@@ -186,8 +167,8 @@ def build_opener(proxy, ssldisabled, nofollow=False):
 
 def normalize(target):
     try:
-        if (socket.inet_aton(target)):
-            target = 'http://' + target
+        socket.inet_aton(target)
+        target = 'http://' + target
     except (ValueError, socket.error):
         if not target.startswith(('http://', 'https://')):
             target = 'https://' + target
@@ -204,8 +185,10 @@ def print_error(target, e):
 
     elif isinstance(e, urllib.error.URLError):
         if "CERTIFICATE_VERIFY_FAILED" in str(e.reason):
-            sys.stderr.write("SSL: Certificate validation error.\nIf you want to \
-    ignore it run the program with the \"-d\" option.\n")
+            sys.stderr.write(
+                "SSL: Certificate validation error.\n"
+                "If you want to ignore it run the program with the \"-d\" option.\n"
+            )
         else:
             sys.stderr.write("Target host {} seems to be unreachable ({})\n".format(target, e.reason))
 
@@ -213,27 +196,18 @@ def print_error(target, e):
         sys.stderr.write("{}\n".format(str(e)))
 
 
-def check_target(target):
+def check_target(target, req_headers=None, usemethod='HEAD'):
     '''
-    Just put a protocol to a valid IP and check if connection works,
-    returning HEAD response
+    Normalize the target URL and perform an HTTP request, returning the
+    response object, or None if the target is unreachable.
     '''
-    # Recover used options
-    ssldisabled = options.ssldisabled
-    useget = options.useget
-    usemethod = options.usemethod
-    proxy = options.proxy
     response = None
 
     target = normalize(target)
 
-    request = urllib.request.Request(target, headers=client_headers)
-    # Set method
-    method = "GET" if useget else usemethod
-    request.get_method = lambda: method
+    request = urllib.request.Request(target, headers=req_headers or client_headers)
+    request.get_method = lambda: usemethod
 
-    # Build opener for proxy and SSL (and optionally do not follow redirects)
-    build_opener(proxy, ssldisabled, options.no_follow)
     try:
         response = urllib.request.urlopen(request, timeout=10)
 
@@ -251,13 +225,6 @@ def check_target(target):
         return response
     sys.stderr.write("Couldn't read a response from server.\n")
     return None
-
-
-def is_https(target):
-    '''
-    Check if target support HTTPS for Strict-Transport-Security
-    '''
-    return target.startswith('https://')
 
 
 def report(target, safe, unsafe):
@@ -281,6 +248,70 @@ def parse_csp(csp):
         log("\t" + colorize(elements[0], 'info') + (": " + values if values != "" else ""))
 
 
+def parse_options():
+    parser = argparse.ArgumentParser(
+        prog=sys.argv[0],
+        usage="%(prog)s [options] <target>",
+    )
+
+    parser.add_argument("targets", nargs="*", metavar="target",
+                        help="Target URL(s) to check")
+    parser.add_argument("-p", "--port", dest="port",
+                        help="Set a custom port to connect to",
+                        metavar="PORT")
+    parser.add_argument("-c", "--cookie", dest="cookie",
+                        help="Set cookies for the request",
+                        metavar="COOKIE_STRING")
+    parser.add_argument("-a", "--add-header", dest="custom_headers",
+                        help="Add headers for the request e.g. 'Header: value'",
+                        metavar="HEADER_STRING", action="append")
+    parser.add_argument('-d', "--disable-ssl-check", dest="ssldisabled",
+                        default=False,
+                        help="Disable SSL/TLS certificate validation",
+                        action="store_true")
+    parser.add_argument('-g', "--use-get-method", dest="useget",
+                        default=False, help="Use GET method instead HEAD method",
+                        action="store_true")
+    parser.add_argument('-m', "--use-method", dest="usemethod", default='HEAD',
+                        choices=["HEAD", "GET", "POST", "PUT", "DELETE", "TRACE"],
+                        help="Use a specified method")
+    parser.add_argument("-j", "--json-output", dest="json_output",
+                        default=False, help="Print the output in JSON format",
+                        action="store_true")
+    parser.add_argument("-i", "--information", dest="information", default=False,
+                        help="Display information headers",
+                        action="store_true")
+    parser.add_argument("-x", "--caching", dest="cache_control", default=False,
+                        help="Display caching headers",
+                        action="store_true")
+    parser.add_argument("-k", "--deprecated", dest="show_deprecated", default=False,
+                        help="Display deprecated headers",
+                        action="store_true")
+    parser.add_argument("--proxy", dest="proxy",
+                        help="Set a proxy (Ex: http://127.0.0.1:8080)",
+                        metavar="PROXY_URL")
+    parser.add_argument("--hfile", dest="hfile",
+                        help="Load a list of hosts from a flat file",
+                        metavar="PATH_TO_FILE")
+    parser.add_argument("--colours", "--colors", dest="colours",
+                        help="Set up a colour profile [dark/light/none]",
+                        default="dark")
+    parser.add_argument("--no-follow", dest="no_follow", default=False,
+                        help="Do not follow HTTP redirects (return 3xx response)",
+                        action="store_true")
+
+    args = parser.parse_args()
+    if args.useget:
+        args.usemethod = 'GET'
+    targets = args.targets
+
+    if len(targets) < 1 and args.hfile is None:
+        parser.print_help()
+        sys.exit(12)
+
+    return args, targets
+
+
 def main():
     # Getting options
     global options
@@ -295,15 +326,10 @@ def main():
     hfile = options.hfile
     json_output = options.json_output
 
-    # Disabling printing if json output is requested
-    if json_output:
-        global json_headers
-        sys.stdout = open(os.devnull, 'w')
-
     banner()
-    # Set a custom port if provided
+    req_headers = dict(client_headers)
     if cookie is not None:
-        client_headers.update({'Cookie': cookie})
+        req_headers.update({'Cookie': cookie})
 
     # Set custom headers if provided
     if custom_headers is not None:
@@ -312,7 +338,7 @@ def main():
             header_split = header.split(': ')
             # Add to existing headers using header name and header value
             try:
-                client_headers.update({header_split[0]: header_split[1]})
+                req_headers.update({header_split[0]: header_split[1]})
             except IndexError:
                 s = "[!] Header strings must be of the format 'Header: value'"
                 print(s)
@@ -321,6 +347,8 @@ def main():
     if hfile is not None:
         with open(hfile) as f:
             targets = f.read().splitlines()
+
+    build_opener(options.proxy, options.ssldisabled, options.no_follow)
 
     json_out = {}
     for target in targets:
@@ -334,14 +362,14 @@ def main():
         log("[*] Analyzing headers of {}".format(colorize(target, 'info')))
 
         # Check if target is valid
-        response = check_target(target)
+        response = check_target(target, req_headers, usemethod=options.usemethod)
         if not response:
             continue
         rUrl = response.geturl()
         json_results = {}
 
         log("[*] Effective URL: {}".format(colorize(rUrl, 'info')))
-        parse_headers(response.getheaders())
+        headers = parse_headers(response.getheaders())
         json_headers[f"{rUrl}"] = json_results
         json_results["present"] = {}
         json_results["missing"] = []
@@ -350,7 +378,7 @@ def main():
         target_sec_headers = dict(sec_headers)
         if "content-security-policy" in headers.keys() and "frame-ancestors" in headers.get("content-security-policy").lower():
             target_sec_headers.pop("X-Frame-Options", None)
-            headers.pop("X-Frame-Options".lower(), None)
+            headers.pop('x-frame-options', None)
 
         for safeh in target_sec_headers:
             lsafeh = safeh.lower()
@@ -361,25 +389,25 @@ def main():
                 # Taking care of special headers that could have bad values
 
                 # Parse CSP headers
-                if lsafeh == 'Content-Security-Policy'.lower():
+                if lsafeh == 'content-security-policy':
                     log("[*] Header {} is present!".format(
                             colorize(safeh, 'ok')))
                     parse_csp(headers.get(lsafeh))
 
                 # X-XSS-Protection Should be enabled
-                elif lsafeh == 'X-XSS-Protection'.lower() and headers.get(lsafeh) == '0':
+                elif lsafeh == 'x-xss-protection' and headers.get(lsafeh) == '0':
                     log("[*] Header {} is present! (Value: {})".format(
                             colorize(safeh, 'ok'),
                             colorize(headers.get(lsafeh), 'warning')))
 
                 # unsafe-url policy is more insecure compared to the default/unset value
-                elif lsafeh == 'Referrer-Policy'.lower() and headers.get(lsafeh) == 'unsafe-url':
+                elif lsafeh == 'referrer-policy' and headers.get(lsafeh) == 'unsafe-url':
                     log("[!] Insecure header {} is set! (Value: {})".format(
                             colorize(safeh, 'warning'),
                             colorize(headers.get(lsafeh), 'error')))
 
                 # check for max-age=0 in HSTS
-                elif lsafeh == 'Strict-Transport-Security'.lower() and "max-age=0" in headers.get(lsafeh):
+                elif lsafeh == 'strict-transport-security' and "max-age=0" in headers.get(lsafeh):
                     log("[!] Insecure header {} is set! (Value: {})".format(
                             colorize(safeh, 'warning'),
                             colorize(headers.get(lsafeh), 'error')))
@@ -393,14 +421,14 @@ def main():
                 unsafe += 1
                 json_results["missing"].append(safeh)
                 # HSTS works obviously only on HTTPS
-                if lsafeh == 'Strict-Transport-Security'.lower() and not is_https(rUrl):
+                if lsafeh == 'strict-transport-security' and not rUrl.startswith('https://'):
                     unsafe -= 1
                     json_results["missing"].remove(safeh)
                     continue
                 # Hide deprecated
                 if not show_deprecated and target_sec_headers.get(safeh) == "deprecated":
                     unsafe -= 1
-                    json_results["missing"].remove(safeh)            
+                    json_results["missing"].remove(safeh)
                     continue
                 log('[!] Security header missing: {}'.format(
                     colorize(safeh, sec_headers.get(safeh))))
@@ -441,65 +469,8 @@ header {} is present! (Value: {})".format(
         json_out.update(json_headers)
 
     if json_output:
-        sys.stdout = sys.__stdout__
         print(json.dumps(json_out))
 
-
-
-def parse_options():
-    parser = OptionParser("Usage: %prog [options] <target>", prog=sys.argv[0])
-
-    parser.add_option("-p", "--port", dest="port",
-                      help="Set a custom port to connect to",
-                      metavar="PORT")
-    parser.add_option("-c", "--cookie", dest="cookie",
-                      help="Set cookies for the request",
-                      metavar="COOKIE_STRING")
-    parser.add_option("-a", "--add-header", dest="custom_headers",
-                      help="Add headers for the request e.g. 'Header: value'",
-                      metavar="HEADER_STRING", action="append")
-    parser.add_option('-d', "--disable-ssl-check", dest="ssldisabled",
-                      default=False,
-                      help="Disable SSL/TLS certificate validation",
-                      action="store_true")
-    parser.add_option('-g', "--use-get-method", dest="useget",
-                      default=False, help="Use GET method instead HEAD method",
-                      action="store_true")
-    parser.add_option('-m', "--use-method", dest="usemethod", default='HEAD',
-                      choices=["HEAD", "GET", "POST", "PUT", "DELETE", "TRACE"],
-                      help="Use a specified method",)
-    parser.add_option("-j", "--json-output", dest="json_output",
-                      default=False, help="Print the output in JSON format",
-                      action="store_true")
-    parser.add_option("-i", "--information", dest="information", default=False,
-                      help="Display information headers",
-                      action="store_true")
-    parser.add_option("-x", "--caching", dest="cache_control", default=False,
-                      help="Display caching headers",
-                      action="store_true")
-    parser.add_option("-k", "--deprecated", dest="show_deprecated", default=False,
-                      help="Display deprecated headers",
-                      action="store_true")
-    parser.add_option("--proxy", dest="proxy",
-                      help="Set a proxy (Ex: http://127.0.0.1:8080)",
-                      metavar="PROXY_URL")
-    parser.add_option("--hfile", dest="hfile",
-                      help="Load a list of hosts from a flat file",
-                      metavar="PATH_TO_FILE")
-    parser.add_option("--colours", dest="colours",
-                      help="Set up a colour profile [dark/light/none]",
-                      default="dark")
-    parser.add_option("--colors", dest="colours",
-                      help="Alias for colours for US English")
-    parser.add_option("--no-follow", dest="no_follow", default=False,
-                      help="Do not follow HTTP redirects (return 3xx response)", action="store_true")
-    (options, targets) = parser.parse_args()
-
-    if len(targets) < 1 and options.hfile is None:
-        parser.print_help()
-        sys.exit(12)
-
-    return options, targets
 
 if __name__ == "__main__":
     main()
