@@ -25,7 +25,6 @@ import http.client
 import socket
 import sys
 import ssl
-import os
 import json
 from optparse import OptionParser
 
@@ -136,9 +135,9 @@ def parse_headers(hdrs):
 
 
 def append_port(target, port):
-    return target[:-1] + ':' + port + '/' \
-        if target[-1:] == '/' \
-        else target + ':' + port + '/'
+    if target[-1:] == '/':
+        return target[:-1] + ':' + port + '/'
+    return target + ':' + port
 
 
 def build_opener(proxy, ssldisabled, nofollow=False):
@@ -186,8 +185,8 @@ def build_opener(proxy, ssldisabled, nofollow=False):
 
 def normalize(target):
     try:
-        if (socket.inet_aton(target)):
-            target = 'http://' + target
+        socket.inet_aton(target)
+        target = 'http://' + target
     except (ValueError, socket.error):
         if not target.startswith(('http://', 'https://')):
             target = 'https://' + target
@@ -295,11 +294,6 @@ def main():
     hfile = options.hfile
     json_output = options.json_output
 
-    # Disabling printing if json output is requested
-    if json_output:
-        global json_headers
-        sys.stdout = open(os.devnull, 'w')
-
     banner()
     # Set a custom port if provided
     if cookie is not None:
@@ -350,7 +344,7 @@ def main():
         target_sec_headers = dict(sec_headers)
         if "content-security-policy" in headers.keys() and "frame-ancestors" in headers.get("content-security-policy").lower():
             target_sec_headers.pop("X-Frame-Options", None)
-            headers.pop("X-Frame-Options".lower(), None)
+            headers.pop('x-frame-options', None)
 
         for safeh in target_sec_headers:
             lsafeh = safeh.lower()
@@ -361,25 +355,25 @@ def main():
                 # Taking care of special headers that could have bad values
 
                 # Parse CSP headers
-                if lsafeh == 'Content-Security-Policy'.lower():
+                if lsafeh == 'content-security-policy':
                     log("[*] Header {} is present!".format(
                             colorize(safeh, 'ok')))
                     parse_csp(headers.get(lsafeh))
 
                 # X-XSS-Protection Should be enabled
-                elif lsafeh == 'X-XSS-Protection'.lower() and headers.get(lsafeh) == '0':
+                elif lsafeh == 'x-xss-protection' and headers.get(lsafeh) == '0':
                     log("[*] Header {} is present! (Value: {})".format(
                             colorize(safeh, 'ok'),
                             colorize(headers.get(lsafeh), 'warning')))
 
                 # unsafe-url policy is more insecure compared to the default/unset value
-                elif lsafeh == 'Referrer-Policy'.lower() and headers.get(lsafeh) == 'unsafe-url':
+                elif lsafeh == 'referrer-policy' and headers.get(lsafeh) == 'unsafe-url':
                     log("[!] Insecure header {} is set! (Value: {})".format(
                             colorize(safeh, 'warning'),
                             colorize(headers.get(lsafeh), 'error')))
 
                 # check for max-age=0 in HSTS
-                elif lsafeh == 'Strict-Transport-Security'.lower() and "max-age=0" in headers.get(lsafeh):
+                elif lsafeh == 'strict-transport-security' and "max-age=0" in headers.get(lsafeh):
                     log("[!] Insecure header {} is set! (Value: {})".format(
                             colorize(safeh, 'warning'),
                             colorize(headers.get(lsafeh), 'error')))
@@ -393,7 +387,7 @@ def main():
                 unsafe += 1
                 json_results["missing"].append(safeh)
                 # HSTS works obviously only on HTTPS
-                if lsafeh == 'Strict-Transport-Security'.lower() and not is_https(rUrl):
+                if lsafeh == 'strict-transport-security' and not is_https(rUrl):
                     unsafe -= 1
                     json_results["missing"].remove(safeh)
                     continue
@@ -441,7 +435,6 @@ header {} is present! (Value: {})".format(
         json_out.update(json_headers)
 
     if json_output:
-        sys.stdout = sys.__stdout__
         print(json.dumps(json_out))
 
 
