@@ -20,16 +20,10 @@
 from setuptools import setup
 
 PACKAGE_NAME = "shcheck"
-VERSION = "1.6.7"
+VERSION = "1.7"
 
 with open("README.md", "r", encoding="utf-8") as fh:
     long_description = fh.read()
-
-
-def parse_requirements(filename):
-    """Load requirements from a pip requirements file."""
-    lineiter = (line.strip() for line in open(filename))
-    return [line for line in lineiter if line and not line.startswith("#")]
 
 
 if __name__ == "__main__":

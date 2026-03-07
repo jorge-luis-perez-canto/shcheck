@@ -20,7 +20,6 @@
 import urllib.request
 import urllib.error
 import urllib.parse
-import urllib.response
 import http.client
 import socket
 import sys
@@ -121,7 +120,7 @@ def colorize(string, alert):
 
 
 def parse_headers(hdrs):
-    return dict((x.lower(), y) for x, y in hdrs)
+    return {x.lower(): y for x, y in hdrs}
 
 
 def append_port(target, port):
@@ -370,13 +369,13 @@ def main():
 
         log("[*] Effective URL: {}".format(colorize(rUrl, 'info')))
         headers = parse_headers(response.getheaders())
-        json_headers[f"{rUrl}"] = json_results
+        json_headers[rUrl] = json_results
         json_results["present"] = {}
         json_results["missing"] = []
 
         # Before parsing, remove X-Frame-Options if there's CSP with frame-ancestors directive
         target_sec_headers = dict(sec_headers)
-        if "content-security-policy" in headers.keys() and "frame-ancestors" in headers.get("content-security-policy").lower():
+        if "content-security-policy" in headers and "frame-ancestors" in headers.get("content-security-policy").lower():
             target_sec_headers.pop("X-Frame-Options", None)
             headers.pop('x-frame-options', None)
 
