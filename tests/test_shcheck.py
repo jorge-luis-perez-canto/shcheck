@@ -113,6 +113,12 @@ def test_append_port_without_trailing_slash():
 def test_normalize_bare_ip_adds_http():
     assert shcheck.normalize('192.168.1.1') == 'http://192.168.1.1'
 
+def test_normalize_bare_domain_adds_https():
+    assert shcheck.normalize('github.com') == 'https://github.com'
+
+def test_normalize_bare_domain_with_path_adds_https():
+    assert shcheck.normalize('github.com/santoru/shcheck') == 'https://github.com/santoru/shcheck'
+
 def test_normalize_https_url_unchanged():
     assert shcheck.normalize('https://example.com') == 'https://example.com'
 

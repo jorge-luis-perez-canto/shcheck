@@ -189,7 +189,8 @@ def normalize(target):
         if (socket.inet_aton(target)):
             target = 'http://' + target
     except (ValueError, socket.error):
-        pass
+        if not target.startswith(('http://', 'https://')):
+            target = 'https://' + target
     return target
 
 
