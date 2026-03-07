@@ -393,7 +393,7 @@ def main():
                 unsafe += 1
                 json_results["missing"].append(safeh)
                 # HSTS works obviously only on HTTPS
-                if safeh == 'Strict-Transport-Security'.lower() and not is_https(rUrl):
+                if lsafeh == 'Strict-Transport-Security'.lower() and not is_https(rUrl):
                     unsafe -= 1
                     json_results["missing"].remove(safeh)
                     continue
